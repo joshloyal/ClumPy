@@ -3,6 +3,8 @@ from setuptools import setup
 
 PACKAGES = [
         'clumpy',
+        'clumpy.datasets',
+        'clumpy.datasets.data',
         'clumpy.tests',
 ]
 
