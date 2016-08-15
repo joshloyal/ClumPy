@@ -24,6 +24,14 @@ def proposed_centers(X, center):
     return np.vstack((c1, c2))
 
 
+def split_center(old_center, new_centers, clusterer):
+    n_clusteres = clusterer.cluster_centers_.shape[0]
+    new_kmeans = KMeans(n_clusters=n_clusters+1, random_state=1234)
+    new_centers = clusterer.cluster_centers_.tolist()
+    new_centers.remove(new_centers[])
+
+    return new_kmeans
+
 def gmeans(X,
            clusterer=None,
            max_n_clusters=30,
@@ -59,6 +67,7 @@ def gmeans(X,
         cluster_labels = clusterer.labels_
         n_clusters = cluster_centers.shape[0]
 
+    n_centers_added = 0
     for k, cluster_center in enumerate(cluster_centers):
         X_k = X[cluster_labels == k]
         if len(X_k) <= 2:  # not enough datapoints to split (hyper-parameter?)
@@ -78,8 +87,9 @@ def gmeans(X,
 
         if statistic > critical_value:
             new_kmeans = add_centers(cluster, kmeans.cluster_centers_)
+            n_centers_added += 1
 
-    if no_centers_added:
-        return clusterer
+    if n_centers_added:
+        return gmeans(clusterer)
 
-    return gmeans(clusterer)
+    return clusterer
