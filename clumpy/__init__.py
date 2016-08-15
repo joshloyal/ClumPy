@@ -4,6 +4,7 @@ from __future__ import division
 
 from clumpy.auto_kmeans import auto_kmeans
 from clumpy.incremental_kmeans import incremental_kmeans
+from clumpy.k_medoids import KMedoids
 from clumpy.gmeans import gmeans
 from clumpy import datasets
 from clumpy import plots

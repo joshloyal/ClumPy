@@ -12,6 +12,7 @@ def compute_improvement(ref, new):
 def incremental_kmeans(X,
                        clusterer=None,
                        min_improvement=0.01,
+                       min_cluster_samples=None,
                        max_n_clusters=30,
                        random_state=1234,
                        n_jobs=1):
@@ -50,7 +51,7 @@ def incremental_kmeans(X,
         Number of jobs to run in parallel. Used by the clustering object.
     """
     if clusterer is None:
-        clusterer = auto_kmeans(X, n_jobs=n_jobs)
+        clusterer = auto_kmeans(X, n_clusters=[2], n_jobs=n_jobs)
 
     n_clusters = clusterer.n_clusters
     if n_clusters >= max_n_clusters:
@@ -77,12 +78,12 @@ def incremental_kmeans(X,
 
     # split worst cluster
     X_k = X[np.where(labels == worst_k)[0]]
-    if len(X_k) <= 2:  # not enough datapoints to split
+    if min_cluster_samples and len(X_k) <= min_cluster_samples:  # not enough datapoints to split
         return clusterer
 
     # split into two clusters
     kmeans = cluster.KMeans(
-        n_clusters=2, random_state=2, n_jobs=n_jobs)
+        n_clusters=2, random_state=2, n_jobs=n_jobs, n_init=5, max_iter=10)
     kmeans.fit(X_k)
 
     # measure improvement (if any)

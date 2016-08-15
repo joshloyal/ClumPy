@@ -54,8 +54,8 @@ def auto_kmeans(X, n_clusters=[2, 3, 4], n_jobs=1):
     the parallelism inside the model instead.
     """
     grid_search = GridSearchCV(
-        cluster.KMeans(n_init=20, max_iter=10, n_jobs=n_jobs),
-        param_grid={'n_clusters': [2, 3, 4]},
+        cluster.KMeans(n_init=5, max_iter=10, n_jobs=n_jobs),
+        param_grid={'n_clusters': n_clusters},
         cv=UnsupervisedCV(n_samples=int(X.shape[0])),
         scoring=make_cluster_coherence_scorer(metrics.silhouette_score),
         n_jobs=1)
