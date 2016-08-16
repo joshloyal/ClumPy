@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from clumpy.datasets import utils as data_utils
+from clumpy.datasets import data_view as dv
 
 
 root = os.path.abspath(os.path.dirname(__file__))
@@ -16,41 +17,73 @@ FILE_NAME = os.path.join(root, DATA_NAME, '10k_diabetes.csv')
 EMBEDDING_FILE_NAME = os.path.join(root, DATA_NAME, '10k_tsne.npy')
 
 
-def fetch_10kdiabetes(only_numerics=False, only_categoricals=False, one_hot=False):
-    # load data
-    try:
-        df = pd.read_csv(FILE_NAME)
-    except IOError:
-        raise IOError('Please download 10kdiabetes')
+class DiabetesView(dv.DataView):
+    def as_raw(self):
+        try:
+            self._data = pd.read_csv(FILE_NAME)
+        except IOError:
+            raise IOError('Please download 10kdiabetes')
 
-    # don't use the target for clustering for now
-    df.pop('readmitted')
+        return self._data
 
-    # remove text columns
-    df = df.drop(['diag_1_desc', 'diag_2_desc', 'diag_3_desc'], axis=1)
+    def as_cleaned(self):
+        if self._cleaned is not None:
+            return self._cleaned
 
-    # drop low info
-    good_cols = df.apply(lambda x: np.unique(x).shape[0] > 1, axis=0)
-    df = df[ good_cols[good_cols].index ]
+        df = self._data.copy()
 
-    # call before replace None...
-    numeric_cols = data_utils.numeric_columns(df)
-    if numeric_cols:
-        num_x = data_utils.mean_impute_numerics(df[numeric_cols])
-        numerics = pd.DataFrame(num_x, columns=df[numeric_cols].columns)
+        # remove text columns
+        df = df.drop(['readmitted', 'diag_1_desc', 'diag_2_desc', 'diag_3_desc'], axis=1)
+
+        # drop low info
+        good_cols = df.apply(lambda x: np.unique(x).shape[0] > 1, axis=0)
+        df = df[ good_cols[good_cols].index ]
+        self._cleaned = df
+
+        return self._cleaned
+
+    def as_ordinal(self):
+        if self._ordinal is not None:
+            return self._ordinal
+
+        df = self.as_cleaned().copy()
+        numeric_cols = data_utils.numeric_columns(df)
+        if numeric_cols:
+            num_x = data_utils.mean_impute_numerics(df[numeric_cols])
+            numerics = pd.DataFrame(num_x, columns=df[numeric_cols].columns)
+
+        # replace NaN
+        categorical_cols = data_utils.categorical_columns(df)
+        categorical_df = data_utils.replace_null(df[categorical_cols], value='NaN', inplace=True)
+        categoricals = data_utils.label_encode(categorical_df)
+
+        self._ordinal = pd.concat([numerics, categoricals], axis=1)
+
+        return self._ordinal
+
+    def as_onehot(self):
+        if self._onehot is not None:
+            return self._onehot
+
+        df = self.as_cleaned().copy()
+        numeric_cols = data_utils.numeric_columns(df)
+        if numeric_cols:
+            num_x = data_utils.mean_impute_numerics(df[numeric_cols])
+            numerics = pd.DataFrame(num_x, columns=df[numeric_cols].columns)
 
 
-    # replace NaN
-    categorical_cols = data_utils.categorical_columns(df)
-    categorical_df = data_utils.replace_null(df[categorical_cols], value='NaN', inplace=True)
-    categoricals = pd.get_dummies(categorical_df, drop_first=True)
+        # replace NaN
+        categorical_cols = data_utils.categorical_columns(df)
+        categorical_df = data_utils.replace_null(df[categorical_cols], value='NaN', inplace=True)
+        categoricals = pd.get_dummies(categorical_df, drop_first=True)
 
-    if only_numerics:
-        return numerics
-    elif only_categoricals:
-        return categoricals
-    else:
-        return pd.concat([numerics, categoricals], axis=1)
+        self._onehot = pd.concat([numerics, categoricals], axis=1)
+
+        return self._onehot
+
+
+def fetch_10kdiabetes():
+    return DiabetesView()
 
 
 def fetch_10kdiabetes_embedding():

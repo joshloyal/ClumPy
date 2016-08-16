@@ -26,16 +26,19 @@ def get_code(tree, feature_names):
     recurse(left, right, threshold, features, 0)
 
 
-def top_k_features(estimator, top_k=None):
+def top_k_features(estimator, columns=None, top_k=None):
     """top_k features from a forest ensemble."""
     importances = estimator.feature_importances_
     sorted_features = np.argsort(importances)[::-1]
     if top_k is not None:
         sorted_features = sorted_features[:top_k]
+
+    if columns is not None:
+        return [columns[index] for index in sorted_features]
     return sorted_features
 
 
-def ova_forest_importance(X, cluster_labels, top_k=None):
+def ova_forest_importance(X, cluster_labels, columns=None, top_k=None):
     """Determine distinguishing cluster features based on
     RandomForest feature importances.
     """
@@ -44,7 +47,7 @@ def ova_forest_importance(X, cluster_labels, top_k=None):
         estimator=RandomForestClassifier(n_estimators=500, n_jobs=-1))
     cluster_classifier.fit(X, cluster_labels)
 
-    feature_importance = [top_k_features(estimator, top_k) for estimator in
+    feature_importance = [top_k_features(estimator, columns=columns, top_k=top_k) for estimator in
                           cluster_classifier.estimators_]
 
     return feature_importance

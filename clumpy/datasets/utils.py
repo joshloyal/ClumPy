@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import six
 
+from sklearn.preprocessing import LabelEncoder
 from sklearn.preprocessing import StandardScaler
 from sklearn.preprocessing import Imputer
 
@@ -62,4 +63,16 @@ def mean_impute_numerics(dataframe):
 
 def replace_null(dataframe, value='NaN', inplace=False):
     dataframe.fillna(value, inplace=inplace)
+    return dataframe
+
+
+def label_encode(dataframe, inplace=False):
+    if not inplace:
+        dataframe = dataframe.copy()
+
+    for column in dataframe.columns:
+        if dataframe[column].dtype == np.object:
+            encoder = LabelEncoder()
+            dataframe[column] = encoder.fit_transform(dataframe[column])
+
     return dataframe
