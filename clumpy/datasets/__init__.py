@@ -6,3 +6,4 @@ from clumpy.datasets.hdbscan_demo import fetch_hdbscan_demo
 from clumpy.datasets.diabetes import fetch_10kdiabetes
 from clumpy.datasets.diabetes import fetch_10kdiabetes_embedding
 from clumpy.datasets.diabetes import DiabetesView
+from clumpy.datasets.cars import fetch_cars

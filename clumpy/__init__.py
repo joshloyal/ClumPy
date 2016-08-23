@@ -11,3 +11,4 @@ from clumpy.forest_embedding import RandomForestEmbedding
 from clumpy import cluster_rules as rules
 from clumpy import datasets
 from clumpy import plots
+from clumpy import metrics

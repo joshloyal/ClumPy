@@ -30,7 +30,7 @@ class DiabetesView(dv.DataView):
         if self._cleaned is not None:
             return self._cleaned
 
-        df = self._data.copy()
+        df = self.as_raw().copy()
 
         # remove text columns
         df = df.drop(['readmitted', 'diag_1_desc', 'diag_2_desc', 'diag_3_desc'], axis=1)
@@ -42,22 +42,34 @@ class DiabetesView(dv.DataView):
 
         return self._cleaned
 
+    def as_numeric(self):
+        df = self.as_cleaned().copy()
+        numeric_cols = data_utils.numeric_columns(df)
+        return df[numeric_cols]
+
+    def as_nominal(self):
+        numeric = self.as_numeric()
+        num_x = data_utils.min_max_scale(numeric)
+        return pd.DataFrame(num_x, columns=numeric.columns)
+
     def as_ordinal(self):
         if self._ordinal is not None:
             return self._ordinal
 
         df = self.as_cleaned().copy()
-        numeric_cols = data_utils.numeric_columns(df)
-        if numeric_cols:
-            num_x = data_utils.mean_impute_numerics(df[numeric_cols])
-            numerics = pd.DataFrame(num_x, columns=df[numeric_cols].columns)
+        #numeric_cols = data_utils.numeric_columns(df)
+        #if numeric_cols:
+        #    #num_x = data_utils.mean_impute_numerics(df[numeric_cols])
+        #    num_x = data_utils.min_max_scale(df[numeric_cols])
+        #    numerics = pd.DataFrame(num_x, columns=df[numeric_cols].columns)
 
         # replace NaN
         categorical_cols = data_utils.categorical_columns(df)
         categorical_df = data_utils.replace_null(df[categorical_cols], value='NaN', inplace=True)
         categoricals = data_utils.label_encode(categorical_df)
 
-        self._ordinal = pd.concat([numerics, categoricals], axis=1)
+        self._ordinal = categoricals
+        #self._ordinal = pd.concat([numerics, categoricals], axis=1)
 
         return self._ordinal
 
@@ -66,10 +78,11 @@ class DiabetesView(dv.DataView):
             return self._onehot
 
         df = self.as_cleaned().copy()
-        numeric_cols = data_utils.numeric_columns(df)
-        if numeric_cols:
-            num_x = data_utils.mean_impute_numerics(df[numeric_cols])
-            numerics = pd.DataFrame(num_x, columns=df[numeric_cols].columns)
+        #numeric_cols = data_utils.numeric_columns(df)
+        #if numeric_cols:
+        #    #num_x = data_utils.mean_impute_numerics(df[numeric_cols])
+        #    num_x = data_utils.min_max_scale(df[numeric_cols])
+        #    numerics = pd.DataFrame(num_x, columns=df[numeric_cols].columns)
 
 
         # replace NaN
@@ -77,7 +90,7 @@ class DiabetesView(dv.DataView):
         categorical_df = data_utils.replace_null(df[categorical_cols], value='NaN', inplace=True)
         categoricals = pd.get_dummies(categorical_df, drop_first=True)
 
-        self._onehot = pd.concat([numerics, categoricals], axis=1)
+        self._onehot = categoricals#pd.concat([numerics, categoricals], axis=1)
 
         return self._onehot
 

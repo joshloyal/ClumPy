@@ -1,4 +1,7 @@
 import numpy as np
+
+from joblib import Parallel, delayed
+from sklearn.base import clone
 from sklearn.utils import check_random_state
 
 from clumpy import KMedoids
@@ -9,7 +12,23 @@ def expand_kmedoids(kmedoids, X):
     return kmedoids
 
 
-def clara(X, n_iter=5, n_clusters=8, n_sub_samples=40, metric=None, random_state=1):
+def _fit_kmedoids(kmedoids, X, sample_ids):
+    kmedoids_ = clone(kmedoids)
+    kmedoids_.fit(X[sample_ids])
+    inertia = kmedoids_.inertia(X)
+
+    return (inertia, kmedoids_)
+
+
+def clara_sample_generator(n_iter, X, sample_size, kmedoids, random_state):
+    n_samples = X.shape[0]
+    for i in xrange(n_iter):
+        sample_ids = random_state.choice(
+                np.arange(n_samples), size=sample_size, replace=False)
+        yield (kmedoids, X, sample_ids)
+
+
+def clara(X, n_iter=5, n_clusters=8, n_sub_samples=40, metric=None, n_jobs=1, random_state=1):
     """CLARA (Clustering Large Applications).
 
     Parameters
@@ -40,22 +59,17 @@ def clara(X, n_iter=5, n_clusters=8, n_sub_samples=40, metric=None, random_state
     random_state = check_random_state(random_state)
     n_samples = X.shape[0]
     sample_size = min(n_samples, n_sub_samples + 2 * n_clusters)
-    best_inertia = np.inf
-    best_kmedoids = None
+    kmedoids = KMedoids(n_clusters=n_clusters, random_state=random_state)
 
-    # we could run this in parallel?
-    for i in range(n_iter):
-        # subsequent samples should include the best mediods found in the previous steps.
-        sample_idx = random_state.choice(np.arange(n_samples), size=sample_size, replace=False)
-        kmedoids = KMedoids(n_clusters=n_clusters, random_state=random_state)
-        kmedoids.fit(X[sample_idx])
+    # fit subsampled k-medoids in parallel.
+    # NOTE: Doesn't work for original heuristic that uses medoids found in
+    #       the previous step, but could be re-initialized for each
+    #       new parallel batch.
+    result = Parallel(n_jobs=n_jobs)(delayed(_fit_kmedoids)(*x) for x in
+            clara_sample_generator(n_iter, X, sample_size, kmedoids, random_state))
 
-        # assign closest medoid to each datapoint
-        inertia = kmedoids.inertia(X)
-
-        if inertia < best_inertia:
-            best_inertia = inertia
-            best_kmedoids = kmedoids
+    # select kmedoids with the lowest inertia
+    best_kmedoids = sorted(result)[0][1]
 
     # now turn best_kmedoids into a kmedoids over the entire dataset
     kmedoids = expand_kmedoids(best_kmedoids, X)

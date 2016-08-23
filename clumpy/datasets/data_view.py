@@ -10,7 +10,8 @@ class DataView(object):
         self._cleaned = None
         self._ordinal = None
         self._onehot = None
-
+        self._numeric = None
+        self._normalized = None
 
     def as_raw(self):
         raise NotImplementedError()
