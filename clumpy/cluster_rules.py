@@ -32,6 +32,10 @@ def ova_forest_importance(X, cluster_labels, features=None, top_k=None):
 
 
 def train_decision_tree(X, cluster_labels, max_depth):
+    """train_decision_tree
+
+    Train a single decision tree to distinguish clusters.
+    """
     decision_tree = OneVsRestClassifier(
             estimator=DecisionTreeClassifier(max_depth=max_depth, random_state=123))
     decision_tree.fit(X, cluster_labels)
@@ -39,6 +43,36 @@ def train_decision_tree(X, cluster_labels, max_depth):
 
 
 def leave_paths(tree, class_name, feature_names=None):
+    """leave_paths
+
+    Create a list of paths to each leaf node of a scikit-learn decision tree.
+
+    Parameters
+    ----------
+    tree : decision tree classifier
+        The decision tree to be broken down into decision paths. The
+        tree is assumed to be trained in a binary classification fashion
+        as of now.
+
+    class_name : list of strings
+        A list of the positive and negative class names, i.e.
+        ['not cluster', 'cluster'].
+
+    feature_names : list of strings, optional (default=None)
+        Names of each of the features
+
+    Returns
+    -------
+    leaf_paths : list of list of tuples
+        A list of the leaf paths. A typical leaf path will look like
+        [('<=', 0.8, 'x0'), ('>', 0.2, 'x1'), ('cluster', 1234)]
+        where the last element corresponds to the class of that data
+        partition and the number of samples of that class in the
+        training dataset.
+    """
+    if not isinstance(tree, _tree.Tree):
+        tree = tree.tree_
+
     def recurse(tree, child_id, lineage=None):
         if lineage is None:
             values = tree.value[child_id][0, :]
@@ -72,6 +106,12 @@ def leave_paths(tree, class_name, feature_names=None):
 
 
 def get_best_path(leaf_paths, class_name):
+    """get_best_path
+
+    Determine the best path to use as the description from all the
+    paths in a decision tree. This is simply chosen as the partition
+    with the most samples.
+    """
     leaves = [(idx, path[-1]) for idx, path in enumerate(leaf_paths) if
               path[-1][0] == class_name]
     best_path_idx = sorted(leaves, key=lambda x: x[1][1])[-1][0]
@@ -79,6 +119,12 @@ def get_best_path(leaf_paths, class_name):
 
 
 def trim_path(leaf_path):
+    """trim_path
+
+    Trim the path and turn it into a human readable string. This
+    will combine multiple cuts on the same variable by taking maximums
+    when (<=) and minimums when (>).
+    """
     rules = leaf_path[:-1]
     features_used = np.unique([rule[2] for rule in rules])
     description = ''
@@ -99,18 +145,44 @@ def trim_path(leaf_path):
 
 
 def tree_descriptions(X, cluster_labels, feature_names=None, max_depth=10):
+    """tree_descriptions
+
+    Determine 'human readable' descriptions for clusters using the rules
+    of a decision tree algorithm. Specifically, a multi-class decision
+    tree is fit in a one-vs-all fashion to the clusters of the dataset.
+    Then the decision path that contains the partition with the largest
+    number of members of the cluster is chosen as the rules to display.
+    This decision path is extracted and turned into a human readable sentence
+    for interpretation by the user.
+
+    Parameters
+    ----------
+    X : array-like of shape [n_samples, n_features]
+        Data array to fit the decision tree algorithm
+    cluster_labels : array-like of shape [n_samples,]
+        The labels [0 - n_classes] of the corresponding clusters
+    feature_names : list of strings (optional)
+        The names of each feature in the dataset
+    max_depth : int (optional)
+        Depth of the decision tree. This controls how many rules
+        are generated.
+
+    Returns
+    -------
+    leaf_descriptions : list of strings
+        The descriptions of each cluster. The position in the list
+        corresponds to the cluster_id.
+    """
     decision_tree = train_decision_tree(X, cluster_labels, max_depth=max_depth)
 
     leaf_descriptions = []
     for cluster_id, tree in enumerate(decision_tree.estimators_):
         cluster_name = 'cluster {}'.format(cluster_id)
         leaf_paths = leave_paths(
-                tree.tree_,
+                tree,
                 class_name=['not_cluster', cluster_name],
                 feature_names=feature_names)
         best_path = get_best_path(leaf_paths, cluster_name)
         leaf_descriptions.append(trim_path(best_path))
 
     return leaf_descriptions
-
-
