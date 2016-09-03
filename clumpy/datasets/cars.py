@@ -47,7 +47,8 @@ class CarsView(dv.DataView):
         return self._ordinal
 
 def fetch_cars(no_processing=False):
-    #df = pd.read_csv(FILE_NAME)
+    df = pd.read_csv(FILE_NAME)
+    return df
     #numeric_cols = data_utils.numeric_columns(df)
 
     #if no_processing:
@@ -56,4 +57,4 @@ def fetch_cars(no_processing=False):
     #    data = data_utils.mean_impute_numerics(df[numeric_cols])
     #    return pd.DataFrame(data, columns=df[numeric_cols].columns)
 
-    return CarsView()
+    #return CarsView()

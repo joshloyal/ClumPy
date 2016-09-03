@@ -36,24 +36,48 @@ def bin_numeric_column(X, bins=10, random_state=1234):
 
 
 
-def cluster_summary(data, clusterer, bin_numeric=False):
-    data = data.copy()
+def cluster_summary(df, cluster_labels):
+    data = df.copy()
 
-    numeric_cols = data_utils.numeric_columns(data)
-    categorical_cols = data_utils.categorical_columns(data)
-    data['cluster'] = clusterer.labels_
+    # calculate overall statistics
+    stats = data.median()
 
-    if bin_numeric:
-        data[numeric_cols] = data[numeric_cols].apply(bin_numeric_column, axis=1)
-        numeric_summary = data[
-            numeric_cols + ['cluster']].groupby('cluster').agg(
-                    mode_aggregate)
-    else:
-        numeric_summary = data[numeric_cols + ['cluster']].groupby('cluster').median()
+    #groupby cluster
+    data['cluster_id'] = cluster_labels
+    #numeric_cols = data_utils.numeric_columns(data)
+    #categorical_cols = data_utils.categorical_columns(data)
+    #data['cluster'] = clusterer.labels_
 
-    # use modes for categoricals
-    categorical_summary = data[
-            categorical_cols + ['cluster']].groupby('cluster').agg(
-                    mode_aggregate)
+    #if bin_numeric:
+    #    data[numeric_cols] = data[numeric_cols].apply(bin_numeric_column, axis=1)
+    #    numeric_summary = data[
+    #        numeric_cols + ['cluster']].groupby('cluster').agg(
+    #                mode_aggregate)
+    #else:
+    #    numeric_summary = data[numeric_cols + ['cluster']].groupby('cluster').median()
 
-    return pd.concat([numeric_summary, categorical_summary], axis=1)
+    ## use modes for categoricals
+    #categorical_summary = data[
+    #        categorical_cols + ['cluster']].groupby('cluster').agg(
+    #                mode_aggregate)
+
+    #return pd.concat([numeric_summary, categorical_summary], axis=1)
+
+    group_stats = data.groupby('cluster_id').median()
+    group_stats.loc['overall'] = stats
+    return group_stats
+
+
+def flat_bar(frame, feature_name, class_column):
+    import matplotlib.pyplot as plt
+
+    n_samples = len(frame)
+    classes = frame[class_column].drop_duplicates()
+    class_col = frame[class_column]
+    df = frame[feature_name]
+
+    ax = plt.gca()
+    for sample_idx in range(n_samples):
+        y = df.iloc[sample_idx].values
+
+

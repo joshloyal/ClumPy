@@ -22,7 +22,7 @@ def ova_forest_importance(X, cluster_labels, features=None, top_k=None):
     """
     # fit a One-Vs-Rest classifier to distinguish clusters
     cluster_classifier = OneVsRestClassifier(
-        estimator=RandomForestClassifier(n_estimators=500, n_jobs=-1))
+        estimator=RandomForestClassifier(n_estimators=100, n_jobs=-1))
     cluster_classifier.fit(X, cluster_labels)
 
     feature_importance = [top_k_features(estimator, features=features, top_k=top_k) for estimator in
@@ -31,13 +31,16 @@ def ova_forest_importance(X, cluster_labels, features=None, top_k=None):
     return feature_importance
 
 
-def train_decision_tree(X, cluster_labels, max_depth):
+def train_decision_tree(X, cluster_labels, max_depth, ova=False):
     """train_decision_tree
 
     Train a single decision tree to distinguish clusters.
     """
-    decision_tree = OneVsRestClassifier(
-            estimator=DecisionTreeClassifier(max_depth=max_depth, random_state=123))
+    if ova:
+        decision_tree = OneVsRestClassifier(
+                estimator=DecisionTreeClassifier(max_depth=max_depth, random_state=123))
+    else:
+        decision_tree = DecisionTreeClassifier(max_depth=max_depth, random_state=123)
     decision_tree.fit(X, cluster_labels)
     return decision_tree
 
@@ -144,7 +147,8 @@ def trim_path(leaf_path):
     return description[:-4]
 
 
-def tree_descriptions(X, cluster_labels, feature_names=None, max_depth=10):
+def tree_descriptions(X, cluster_labels, feature_names=None,
+                      n_features=5, max_depth=10):
     """tree_descriptions
 
     Determine 'human readable' descriptions for clusters using the rules
@@ -163,7 +167,9 @@ def tree_descriptions(X, cluster_labels, feature_names=None, max_depth=10):
         The labels [0 - n_classes] of the corresponding clusters
     feature_names : list of strings (optional)
         The names of each feature in the dataset
-    max_depth : int (optional)
+    n_features : int, optional (default=5)
+        The number of features to use to generate rules.
+    max_depth : int, optional (default=5)
         Depth of the decision tree. This controls how many rules
         are generated.
 
@@ -173,16 +179,35 @@ def tree_descriptions(X, cluster_labels, feature_names=None, max_depth=10):
         The descriptions of each cluster. The position in the list
         corresponds to the cluster_id.
     """
-    decision_tree = train_decision_tree(X, cluster_labels, max_depth=max_depth)
-
     leaf_descriptions = []
-    for cluster_id, tree in enumerate(decision_tree.estimators_):
-        cluster_name = 'cluster {}'.format(cluster_id)
-        leaf_paths = leave_paths(
-                tree,
-                class_name=['not_cluster', cluster_name],
-                feature_names=feature_names)
-        best_path = get_best_path(leaf_paths, cluster_name)
-        leaf_descriptions.append(trim_path(best_path))
+
+    if n_features == 'all':
+        decision_tree = train_decision_tree(
+                X, cluster_labels, max_depth=max_depth, ova=True)
+
+        leaf_descriptions = []
+        for cluster_id, tree in enumerate(decision_tree.estimators_):
+            cluster_name = 'cluster {}'.format(cluster_id)
+            leaf_paths = leave_paths(
+                    tree,
+                    class_name=['not_cluster', cluster_name],
+                    feature_names=feature_names)
+            best_path = get_best_path(leaf_paths, cluster_name)
+            leaf_descriptions.append(trim_path(best_path))
+    else:
+        feature_importance = ova_forest_importance(
+                X, cluster_labels, top_k=n_features)
+
+
+        for cluster_id, features in enumerate(feature_importance):
+            y = (cluster_labels == cluster_id).astype(np.int64)
+            tree = train_decision_tree(X[:, features], y, max_depth=max_depth)
+            cluster_name = 'cluster {}'.format(cluster_id)
+            leaf_paths = leave_paths(
+                    tree,
+                    class_name=['not_cluster', cluster_name],
+                    feature_names=[feature_names[index] for index in features])
+            best_path = get_best_path(leaf_paths, cluster_name)
+            leaf_descriptions.append(trim_path(best_path))
 
     return leaf_descriptions
