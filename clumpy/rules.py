@@ -1,34 +1,8 @@
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.tree import _tree, DecisionTreeClassifier
 
-
-def top_k_features(estimator, features=None, top_k=None):
-    """top_k features from a forest ensemble."""
-    importances = estimator.feature_importances_
-    sorted_features = np.argsort(importances)[::-1]
-    if top_k is not None:
-        sorted_features = sorted_features[:top_k]
-
-    if features is not None:
-        return [features[index] for index in sorted_features]
-    return sorted_features
-
-
-def ova_forest_importance(X, cluster_labels, features=None, top_k=None):
-    """Determine distinguishing cluster features based on
-    RandomForest feature importances.
-    """
-    # fit a One-Vs-Rest classifier to distinguish clusters
-    cluster_classifier = OneVsRestClassifier(
-        estimator=RandomForestClassifier(n_estimators=100, n_jobs=-1))
-    cluster_classifier.fit(X, cluster_labels)
-
-    feature_importance = [top_k_features(estimator, features=features, top_k=top_k) for estimator in
-                          cluster_classifier.estimators_]
-
-    return feature_importance
+from clumpy import importance
 
 
 def train_decision_tree(X, cluster_labels, max_depth, ova=False):
@@ -38,9 +12,11 @@ def train_decision_tree(X, cluster_labels, max_depth, ova=False):
     """
     if ova:
         decision_tree = OneVsRestClassifier(
-                estimator=DecisionTreeClassifier(max_depth=max_depth, random_state=123))
+                estimator=DecisionTreeClassifier(
+                    max_depth=max_depth, random_state=123))
     else:
-        decision_tree = DecisionTreeClassifier(max_depth=max_depth, random_state=123)
+        decision_tree = DecisionTreeClassifier(
+            max_depth=max_depth, random_state=123)
     decision_tree.fit(X, cluster_labels)
     return decision_tree
 
@@ -195,7 +171,7 @@ def tree_descriptions(X, cluster_labels, feature_names=None,
             best_path = get_best_path(leaf_paths, cluster_name)
             leaf_descriptions.append(trim_path(best_path))
     else:
-        feature_importance = ova_forest_importance(
+        feature_importance = importance.ova_forest_importance(
                 X, cluster_labels, top_k=n_features)
 
 
