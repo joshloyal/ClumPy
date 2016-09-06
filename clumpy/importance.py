@@ -1,4 +1,10 @@
+from __future__ import division
+
+import collections
+
 import numpy as np
+import scipy.stats as stats
+
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.multiclass import OneVsRestClassifier
 
@@ -32,12 +38,52 @@ def ova_forest_importance(X, cluster_labels, features=None, top_k=None):
     return feature_importance
 
 
+def deviation_importance(X,
+                         cluster_labels,
+                         numeric_indices=None,  # t-test numeric
+                         categorical_indices=None,  # chi2 categorical
+                         feature_names=None,
+                         n_features=5):
+    """deviation_importance
+
+    t/chi-squared test takes clusters vs. overall statistics and looks at
+    deviations of each variable between there means.
+
+    Returns
+    -------
+    importances: dict
+        Returns a dict mapping cluster_id to list of top n features.
+    """
+    importances = {}
+    n_features = X.shape[1]
+    cluster_ids = np.unique(cluster_labels)
+    for cluster_id in cluster_ids:
+        cluster_mask = (cluster_labels == cluster_id)
+        in_cluster = X[cluster_mask]
+        out_cluster = X#[~cluster_mask]
+        pvalues = np.empty(n_features)
+        for col in xrange(n_features):
+            pvalues[col] = stats.ttest_ind(
+                    in_cluster[:, col], out_cluster[:, col])[1]
+
+        # apply beferoni correction and return lowest p-values (valid?)
+        sig_mask = pvalues < (0.05 / n_features)
+        top_k = np.argsort(pvalues[sig_mask])[:n_features]
+        importances[cluster_id] = [
+                feature for idx, feature in enumerate(feature_names) if
+                idx in top_k]
+
+    return importances
+
+
 def anova_importance(X, cluster_labels, feature_names=None, n_features=5):
     """anova_importance
 
     Use the cluster ids as the dependent variables and do a one-way anova
     or t-test to determine significant deviations. May need to do (cluster
     not cluster) to do this on a per cluster basis.
+
+    ANOVA takes variable vs. cluster id and determines significance.
 
     Returns
     -------
@@ -49,3 +95,55 @@ def anova_importance(X, cluster_labels, feature_names=None, n_features=5):
         # perform anova
         # select top n_features
         pass
+
+
+def relevance_score(cluster_proba, marginal_proba, alpha):
+    return (alpha * np.log(cluster_proba) +
+            (1 - alpha) * np.log(cluster_proba / marginal_proba))
+
+
+
+def single_cluster_relevance(
+        column, cluster_labels, cluster_id, data,
+        marginal_probas=None, n_features=5, alpha=0.3):
+    X = data[column].values
+    levels = np.unique(X)
+
+    if marginal_probas is None:
+        n_samples = X.shape[0]
+        levels = np.unique(X)
+        marginal_probas = {}
+        for level in levels:
+            marginal_probas[level] = X[X == level].shape[0] / n_samples
+
+    cluster_X = X[cluster_labels == cluster_id]
+    n_samples_cluster = cluster_X.shape[0]
+
+    rel = {}
+    for level in levels:
+        cluster_proba = cluster_X[cluster_X == level].shape[0] / n_samples_cluster
+        rel[level] = relevance_score(
+                cluster_proba, marginal_probas[level], alpha)
+
+    rel = sorted(rel.items(), key=lambda x: x[1])[::-1]
+    return [r[0] for r in rel if np.isfinite(r[1])][:n_features]
+
+
+def categorical_relevance(column, cluster_labels, data, n_features=5, alpha=0.3):
+    X = data[column].values
+    cluster_ids = np.unique(cluster_labels)
+
+    # calculate marginal statistics
+    n_samples = X.shape[0]
+    levels = np.unique(X)
+    marginal_probas = {}
+    for level in levels:
+        marginal_probas[level] = X[X == level].shape[0] / n_samples
+
+
+    relevance = {cluster_id: single_cluster_relevance(
+                    column, cluster_labels, cluster_id, data,
+                    marginal_probas=marginal_probas) for
+                 cluster_id in cluster_ids}
+
+    return relevance
