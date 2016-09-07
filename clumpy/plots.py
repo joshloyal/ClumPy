@@ -2,11 +2,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler, Imputer
 
 from pandas.tools.plotting import parallel_coordinates
 
 from clumpy import importance
+from clumpy.preprocessing import process_data
 
 sns.set_style('white')
 
@@ -63,10 +64,17 @@ def quant_plot(y, cluster_labels, cluster_id, data, ax=None, scale=False):
     width = 1
     cluster_mask = (cluster_labels == cluster_id)
 
+    # for now print statistics
+    unscaled_marginal = data[y].mean().to_frame().transpose()
+    unscaled_marginal['id'] = 'marginal'
+    unscaled_cluster = data[y][cluster_labels == cluster_id].mean().to_frame().transpose()
+    unscaled_cluster['id'] = 'cluster'
+    print(pd.concat((unscaled_marginal, unscaled_cluster)))
+
     if scale:
         scaled_data = data.copy()
         #scaled_data[data.columns] = MinMaxScaler().fit_transform(data)
-        scaled_data[y] = StandardScaler().fit_transform(data[y])
+        scaled_data[y], num_cols, cat_cols = process_data(data[y], impute='mean', num_preprocessing='standardize')
     else:
         scaled_data = data
 

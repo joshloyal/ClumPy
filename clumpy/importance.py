@@ -5,6 +5,7 @@ import collections
 import numpy as np
 import scipy.stats as stats
 
+from sklearn.feature_selection import SelectKBest, f_classif
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.multiclass import OneVsRestClassifier
 
@@ -38,15 +39,13 @@ def ova_forest_importance(X, cluster_labels, features=None, top_k=None):
     return feature_importance
 
 
-def deviation_importance(X,
-                         cluster_labels,
-                         numeric_indices=None,  # t-test numeric
-                         categorical_indices=None,  # chi2 categorical
-                         feature_names=None,
-                         n_features=5):
-    """deviation_importance
+def ttest_importance(X,
+                     cluster_labels,
+                     feature_names=None,
+                     n_features=5):
+    """ttest_importance
 
-    t/chi-squared test takes clusters vs. overall statistics and looks at
+    t-test takes clusters vs. overall statistics and looks at
     deviations of each variable between there means.
 
     Returns
@@ -90,16 +89,26 @@ def anova_importance(X, cluster_labels, feature_names=None, n_features=5):
     importances: dict
         Returns a dict mapping cluster_id to list of top n features.
     """
+    importances = {}
     cluster_ids = np.unique(cluster_labels)
     for cluster_id in cluster_ids:
-        # perform anova
-        # select top n_features
-        pass
+        selector = SelectKBest(score_func=f_classif, k=n_features)
+        selector.fit(X, cluster_labels == cluster_id)
 
+        if feature_names:
+            importances[cluster_id] = [feature_names[support_id] for
+                                       support_id in
+                                       selector.get_support(indices=True)]
+        else:
+            importances[cluster_id] = selector.get_support(indices=True)
+    return importances
 
 def relevance_score(cluster_proba, marginal_proba, alpha):
-    return (alpha * np.log(cluster_proba) +
-            (1 - alpha) * np.log(cluster_proba / marginal_proba))
+    if cluster_proba == 0.0 and marginal_proba == 0.0:
+        return np.nan
+    else:
+        return (alpha * np.log(cluster_proba) +
+                (1 - alpha) * np.log(cluster_proba / marginal_proba))
 
 
 

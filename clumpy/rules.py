@@ -1,8 +1,10 @@
 import numpy as np
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.tree import _tree, DecisionTreeClassifier
+from sklearn.preprocessing import Imputer
 
 from clumpy import importance
+from clumpy.preprocessing import process_data
 
 
 def train_decision_tree(X, cluster_labels, max_depth, ova=False):
@@ -89,7 +91,9 @@ def get_best_path(leaf_paths, class_name):
 
     Determine the best path to use as the description from all the
     paths in a decision tree. This is simply chosen as the partition
-    with the most samples.
+    with the most samples (may be good to have a threshold of leaf purity)
+
+    We could do an OR on the different partitions.
     """
     leaves = [(idx, path[-1]) for idx, path in enumerate(leaf_paths) if
               path[-1][0] == class_name]
@@ -97,7 +101,7 @@ def get_best_path(leaf_paths, class_name):
     return leaf_paths[best_path_idx]
 
 
-def trim_path(leaf_path):
+def trim_path(leaf_path, categorical_columns=[]):
     """trim_path
 
     Trim the path and turn it into a human readable string. This
@@ -113,8 +117,19 @@ def trim_path(leaf_path):
         if len(feature_group) > 3:
             feature_group = [feature_group[0], feature_group[-1]]
         if len(feature_group) == 1:
+            op = feature_group[0][0]
+            feature_val = feature_group[0][1]
+            if feature in categorical_columns:
+                feature, feature_val = feature.rsplit('_', 1)
+                if op == '<=':
+                    op = '!='
+                else:
+                    op = '=='
+            else:
+                op = feature_group[0][0]
+
             description += '{} {} {}'.format(
-                    feature, feature_group[0][0], feature_group[0][1])
+                    feature, op, feature_val)
         else:
             description += '{} < {} <= {}'.format(
                     feature_group[0][1], feature, feature_group[1][1])
@@ -123,8 +138,9 @@ def trim_path(leaf_path):
     return description[:-4]
 
 
-def tree_descriptions(X, cluster_labels, feature_names=None,
-                      n_features=5, max_depth=10):
+def tree_descriptions(data, cluster_labels,
+                      categorical_columns=[], feature_names=None,
+                      max_depth=10):
     """tree_descriptions
 
     Determine 'human readable' descriptions for clusters using the rules
@@ -137,14 +153,12 @@ def tree_descriptions(X, cluster_labels, feature_names=None,
 
     Parameters
     ----------
-    X : array-like of shape [n_samples, n_features]
+    X : pd.DataFrame of shape [n_samples, n_features]
         Data array to fit the decision tree algorithm
     cluster_labels : array-like of shape [n_samples,]
         The labels [0 - n_classes] of the corresponding clusters
-    feature_names : list of strings (optional)
-        The names of each feature in the dataset
-    n_features : int, optional (default=5)
-        The number of features to use to generate rules.
+    feature_names : dict of lists of strings (optional)
+        The names of each feature in the dataset for a particular cluster
     max_depth : int, optional (default=5)
         Depth of the decision tree. This controls how many rules
         are generated.
@@ -156,34 +170,22 @@ def tree_descriptions(X, cluster_labels, feature_names=None,
         corresponds to the cluster_id.
     """
     leaf_descriptions = []
+    for cluster_id in np.unique(cluster_labels):
+        cluster_features = feature_names[cluster_id]
+        X, num_features, cat_features = process_data(
+                data[cluster_features],
+                categorical_columns=[var for var in cluster_features if var in categorical_columns],
+                cat_preprocessing='onehot')
 
-    if n_features == 'all':
-        decision_tree = train_decision_tree(
-                X, cluster_labels, max_depth=max_depth, ova=True)
+        tree = train_decision_tree(
+                X, cluster_labels == cluster_id, max_depth=max_depth, ova=False)
 
-        leaf_descriptions = []
-        for cluster_id, tree in enumerate(decision_tree.estimators_):
-            cluster_name = 'cluster {}'.format(cluster_id)
-            leaf_paths = leave_paths(
-                    tree,
-                    class_name=['not_cluster', cluster_name],
-                    feature_names=feature_names)
-            best_path = get_best_path(leaf_paths, cluster_name)
-            leaf_descriptions.append(trim_path(best_path))
-    else:
-        feature_importance = importance.ova_forest_importance(
-                X, cluster_labels, top_k=n_features)
-
-
-        for cluster_id, features in enumerate(feature_importance):
-            y = (cluster_labels == cluster_id).astype(np.int64)
-            tree = train_decision_tree(X[:, features], y, max_depth=max_depth)
-            cluster_name = 'cluster {}'.format(cluster_id)
-            leaf_paths = leave_paths(
-                    tree,
-                    class_name=['not_cluster', cluster_name],
-                    feature_names=[feature_names[index] for index in features])
-            best_path = get_best_path(leaf_paths, cluster_name)
-            leaf_descriptions.append(trim_path(best_path))
+        cluster_name = 'cluster {}'.format(cluster_id)
+        leaf_paths = leave_paths(
+                tree,
+                class_name=['not_cluster', cluster_name],
+                feature_names=num_features + cat_features)
+        best_path = get_best_path(leaf_paths, cluster_name)
+        leaf_descriptions.append(trim_path(best_path, categorical_columns=cat_features))
 
     return leaf_descriptions
