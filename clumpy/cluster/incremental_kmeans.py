@@ -2,7 +2,7 @@ import numpy as np
 from sklearn import metrics
 from sklearn import cluster
 
-from clumpy.auto_kmeans import auto_kmeans
+from clumpy.cluster import auto_kmeans
 
 
 def compute_improvement(ref, new):

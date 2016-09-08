@@ -108,7 +108,9 @@ def quant_plot(y, cluster_labels, cluster_id, data, ax=None, scale=False):
 
 
 def plot_cluster_statistics(cluster_labels, cluster_id, data, quant_var=[], qual_var=[], figsize=None, scale=False):
-    fig, axes = plt.subplots(len(qual_var) + 1, 1, sharex=False, figsize=figsize)
+    n_plots = len(qual_var) + 1 if quant_var else len(qual_var)
+
+    fig, axes = plt.subplots(n_plots, 1, sharex=False, figsize=figsize)
     if not isinstance(axes, np.ndarray):
         axes = [axes]
 
