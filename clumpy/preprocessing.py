@@ -1,6 +1,5 @@
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils import column_or_1d, check_array
 from sklearn.preprocessing import Imputer, MinMaxScaler, StandardScaler
 import pandas as pd
 
@@ -12,7 +11,7 @@ def column_atleast_2d(array):
 
 
 def fit_encode_1d(y, strategy='frequency'):
-    y = column_or_1d(y, warn=True)
+    y = column_atleast_2d(y)
     levels = np.unique(y)
 
     # FIXME: serach sorted doesn't work here...
@@ -33,8 +32,8 @@ def transform_encode_1d(y, fit_levels):
 
 def inverse_encode_1d(y, fit_levels):
     """There is probably a built in numpy method for this..."""
-    vec_map = np.vectorize(lambda x: fit_levels[x])
-    return vec_map(y)
+    vec_map = np.vectorize(lambda x: fit_levels[int(x)])
+    return vec_map(y).reshape(-1, 1)
 
 
 class OrdinalEncoder(BaseEstimator, TransformerMixin):
@@ -69,8 +68,9 @@ class OrdinalEncoder(BaseEstimator, TransformerMixin):
                              " n_features_transform= %d" % X.shape[1],
                              " and n_features_fit= %d" % self.n_features_)
 
-        return np.hstack([inverse_encode_1d(X[:, column_idx], levels) for
-                         column_idx, levels in self.level_map.iteritems()])
+        encoding = np.hstack([inverse_encode_1d(X[:, column_idx], levels) for
+                          column_idx, levels in enumerate(self.level_map)])
+        return encoding
 
 
 class ArbitraryImputer(BaseEstimator, TransformerMixin):

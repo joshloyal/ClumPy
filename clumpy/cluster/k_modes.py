@@ -52,7 +52,7 @@ def _huang_init(X, n_clusters, random_state=None):
     unique_X = _unique_rows(X)
     for k in xrange(n_clusters):
         distance_to_candidates = pairwise_distances(
-                unique_X, centers[k, :], metric='hamming')
+                unique_X, np.atleast_2d(centers[k, :]), metric='hamming')
         candidate_idxs = np.argpartition(
                 distance_to_candidates.ravel(), n_clusters-1)[:n_clusters]
 
@@ -65,8 +65,42 @@ def _huang_init(X, n_clusters, random_state=None):
     return centers
 
 
+def _categorical_density(X):
+    n_samples, n_features = X.shape
+
+    # calculate density matrix for each point
+    density = np.zeros(n_samples)
+    for feature_id in xrange(n_features):
+        uniques, counts = np.unique(X[:, feature_id], return_counts=True)
+        density += counts[X[:, feature_id]]
+
+    return density
+
+
 def _cao_init(X, n_clusters, random_state=None):
-    pass
+    """Initialize centroids according to the method of Cao et al. [2009]
+
+    Note: complexity is O(n_samples * n_features * n_clusters**2), i.e.
+          linear in the number of samples and features and quadratic
+          wrt the number of clusters.
+    """
+    n_samples, n_features = X.shape
+    centers = np.empty((n_clusters, n_features), dtype=np.float32)
+
+    # calculate density matrix for each point
+    density = _categorical_density(X)
+
+    # choose initial centroid based on distance and density
+    centers[0, :] = X[np.argmax(density), :]
+
+    if n_clusters > 1:
+        for center_id in xrange(1, n_clusters):
+            center_density = (
+                    pairwise_distances(X, centers[:center_id, :]) *
+                    density.reshape(-1, 1))
+            centers[center_id, :] = X[np.argmax(np.min(center_density, axis=1))]
+
+    return centers
 
 
 def _init_centroids(X, n_clusters=8, init='cao', random_state=None):
@@ -106,74 +140,110 @@ def k_modes_single(X, n_clusters=8, init='cao',
     old_labels = None
 
     for i in range(max_iter):
-        centers_old = centers.copy()
-
         # assign cluster labels to points (E-step of EM)
         labels, inertia = _labels_inertia(X, centers)
+        print(labels)
 
         # computation of the modes (M-step of EM)
         centers, frequencies = _k_modes_centers(
-            X, labels, old_labels, n_clusters, frequencies, max_n_levels)
+            X, labels, old_labels, n_clusters, frequencies, max_n_levels, random_state)
 
-        old_labels = labels
         if best_inertia is None or inertia < best_inertia:
             best_labels = labels.copy()
             best_centers = centers.copy()
             best_inertia = inertia
 
+        if old_labels is not None and (old_labels != labels).sum() == 0:
+            break
+
+        old_labels = labels
+
     return best_labels, best_inertia, best_centers, i + 1
 
 
+
+def _initialize_frequencies(X, labels, n_clusters, max_n_levels):
+    """Initialize a frequency array. This is an array of shape
+    (n_clusters, n_features, max_n_levels) where
+    frequency[cluster_id] gives you the frequency table of that
+    cluster.
+    """
+    n_features = X.shape[1]
+    frequencies = np.zeros((n_clusters, n_features, max_n_levels))
+
+    # what is faster? (probably good for large features?)
+    for cluster_id in xrange(n_clusters):
+        cluster_mask = (labels == cluster_id)
+        counts = np.eye(max_n_levels)[X[cluster_mask]].sum(axis=0)
+        frequencies[cluster_id] += counts
+
+    #for cluster_id in xrange(n_clusters):
+    #    cluster_mask = (labels == cluster_id)
+    #    for feature_id in xrange(n_features):
+    #        uniques, counts = np.unique(
+    #                X[cluster_mask][:, feature_id], return_counts=True)
+    #        frequencies[cluster_id, feature_id, :len(uniques)] = counts
+
+    return frequencies
+
+
+def _move_points(X, frequencies, max_n_levels, old_labels, new_labels):
+    """Move points between clusters. (this needs to be cythonized)"""
+    moved_ids = np.where(old_labels != new_labels)
+    for moved_id in moved_ids:
+        moved_counts = np.eye(max_n_levels)[X[moved_id]]
+        frequencies[old_labels[moved_id]] -= moved_counts
+        frequencies[new_labels[moved_id]] += moved_counts
+
+
 def _labels_inertia(X, centers):
+    # cythonize me!
+    n_samples = X.shape[0]
     n_clusters, n_features = centers.shape
+    labels = np.empty(n_samples)
+    inertia = 0
 
-    distances = pairwise_distances(X, centers, metric='hamming')
-    labels = np.argmin(distances, axis=1)
+    # we need to actualy update modes after each allocation!
+    for point_id in xrange(n_samples):
+        distances = pairwise_distances(X[point_id], centers, metric='hamming')
+        labels[point_id] = np.argmin(distances, axis=1)
+        inertia += distances[labels[point_id]]
+    #distances = pairwise_distances(X, centers, metric='hamming')
+    #labels = np.argmin(distances, axis=1)
 
-    inertia = distances[np.arange(distances.shape[0]), labels].sum()
+    #inertia = distances[np.arange(distances.shape[0]), labels].sum()
 
     return labels, inertia
 
 
-def _k_modes_centers(X, labels, old_labels, n_clusters, frequencies, max_n_levels):
+def _k_modes_centers(X, labels, old_labels, n_clusters, frequencies, max_n_levels, random_state=None):
+    random_state = check_random_state(random_state)
     n_features = X.shape[1]
     centers = np.empty((n_clusters, n_features))
 
-    # an array of frequencies of each attribute in each cluster
     if frequencies is None:
-        frequencies = np.zeros((n_clusters, n_features, max_n_levels))
-
-        # what is faster? (probably good for large features?)
-        for cluster_id in xrange(n_clusters):
-            cluster_mask = (labels == cluster_id)
-            counts = np.eye(max_n_levels)[X[cluster_mask]].sum(axis=0)
-            frequencies[cluster_id] += counts
-
-        #for cluster_id in xrange(n_clusters):
-        #    cluster_mask = (labels == cluster_id)
-        #    for feature_id in xrange(n_features):
-        #        uniques, counts = np.unique(
-        #                X[cluster_mask][:, feature_id], return_counts=True)
-        #        frequencies[cluster_id, feature_id, :len(uniques)] = counts
+        frequencies = _initialize_frequencies(
+                X, labels, n_clusters, max_n_levels)
     else:
-        #    # X = [[2, 3, 4]
-        #    #      [1, 3, 4]]
-        #    # frequency[old_label] - np.eye(max_n_levels)[X].sum(axis=1)
-        #    # frequency[new_label] + np.eye(max_n_levels)[X].sum(axis=1)
-        if old_labels is None:
-            raise ValueError('old_labels is None')
-        moved_mask = (old_labels != labels)
-        moved_counts = np.eye(max_n_levels)[X[moved_mask]].sum(axis=0)
-        frequencies[old_labels] -= moved_counts
-        frequencies[labels] += moved_counts
+        _move_points(X, frequencies, max_n_levels, old_labels, labels)
 
     # centroid update
     for center_id in xrange(n_clusters):
         counts = (labels == center_id).sum()
-        if counts == 0:  # empty cluster random init
-            for feature_id in xrange(n_features):  # plese refactor!
-                uniques = np.unique(X[:, feature_id])
-                centers[center_id, feature_id] = random_state.choice(uniques)
+        if counts == 0:  # empty cluster random init from largest cluster
+            #for feature_id in xrange(n_features):  # please refactor!
+            #    uniques = np.unique(X[:, feature_id])
+            #    centers[center_id, feature_id] = random_state.choice(uniques)
+            # cache this maybe?
+            cluster_ids, counts = np.uniques(labels, return_counts=True)
+            max_cluster_id = counts.argmax()
+            new_id = random_state.choice(labels[labels == max_cluster_id])
+            centers[center_id, :] = X[new_id, :]
+
+            moved_counts = np.eye(max_n_levels)[X[new_id]].sum(axis=0)
+            frequency[max_cluster_id] -= moved_counts
+            frequency[center_id] += moved_counts
+            labels[new_id] = cluster_id
         else:  # init to new mode of cluster
             centers[center_id, :] = np.argmax(frequencies[center_id], axis=1)
 

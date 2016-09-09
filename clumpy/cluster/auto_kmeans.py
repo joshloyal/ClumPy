@@ -4,7 +4,7 @@ from __future__ import division
 
 import numpy as np
 from sklearn import datasets, cluster, metrics
-from sklearn.grid_search import GridSearchCV
+from sklearn.model_selection import GridSearchCV
 
 
 class UnsupervisedCV(object):

@@ -1,9 +1,12 @@
+import time
+
 import numpy as np
 from sklearn.utils import check_random_state
+from sklearn import datasets
 
-
-from clumpy.cluster.k_modes import KModes
+import clumpy.cluster.k_modes as k_modes
 from clumpy.preprocessing import OrdinalEncoder
+from clumpy.cluster.tests import soybean_data
 
 
 def gen_data(n_samples=100, random_state=1):
@@ -16,7 +19,69 @@ def gen_data(n_samples=100, random_state=1):
     return np.hstack((x1, x2, x3))
 
 
-def test_k_modes():
-    X = gen_data(n_samples=10000)
-    kmodes = KModes(n_clusters=8, verbose=True, n_init=10)
-    kmodes.fit(X)
+def test_cao_density():
+    X = np.array([
+        [1, 0, 1],
+        [3, 2, 0],
+        [1, 2, 0],
+    ])
+    encoder = OrdinalEncoder(strategy='none')
+    ordinal_X = encoder.fit_transform(X)
+    density = k_modes._categorical_density(ordinal_X)
+    np.testing.assert_array_equal(density, np.array([4, 5, 6]))
+
+
+def test_cao_init(soybean_data):
+    X = np.array([
+        [1, 0, 1],
+        [3, 2, 0],
+        [1, 2, 0],
+    ])
+    encoder = OrdinalEncoder(strategy='none')
+    ordinal_X = encoder.fit_transform(X)
+    centers = encoder.inverse_transform(
+            k_modes._cao_init(ordinal_X, 3))
+
+    expected = np.array([
+        [1, 2, 0],
+        [1, 0, 1],
+        [3, 2, 0]])
+    np.testing.assert_array_equal(centers, expected)
+
+
+def test_labels_inertia(soybean_data):
+    X = np.array([
+        [1, 0, 1],
+        [3, 2, 0],
+        [1, 2, 0],
+        [1, 0, 3],
+    ])
+
+    encoder = OrdinalEncoder(strategy='none')
+    ordinal_X = encoder.fit_transform(X)
+    centers = ordinal_X[:3]
+    labels, inertia = k_modes._labels_inertia(ordinal_X, centers)
+
+    np.testing.assert_array_equal(labels, np.array([0, 1, 2, 0]))
+    np.testing.assert_allclose(inertia, 1/3.)
+
+
+def test_k_modes_centers():
+    pass
+
+
+def test_k_modes_soybean(soybean_data):
+    #X = gen_data(n_samples=100000)
+    X, labels = soybean_data
+    clusterer = k_modes.KModes(n_clusters=4, init='cao', n_init=1,
+                               verbose=True, random_state=1,
+                               max_iter=10)
+
+    t0 = time.time()
+    clusterer.fit(X)
+    print(time.time() - t0)
+    #print(clusterer.predict(X))
+    print(clusterer.labels_)
+    print(labels)
+    print(clusterer.cluster_centers_.shape)
+    print(clusterer.inertia_)
