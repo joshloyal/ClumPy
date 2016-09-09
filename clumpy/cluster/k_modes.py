@@ -6,6 +6,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import unicode_literals
 
+from six import string_types
 import warnings
 
 import numpy as np
@@ -74,8 +75,8 @@ def _init_centroids(X, n_clusters=8, init='cao', random_state=None):
 
     if isinstance(init, string_types) and init == 'cao':
         centers = _cao_init(X, n_clusters, random_state)
-    elif isinstance(int, string_types) and init == 'huang':
-        centers = _huang_init(X, n_clusters, random_sate)
+    elif isinstance(init, string_types) and init == 'huang':
+        centers = _huang_init(X, n_clusters, random_state)
     else:
         raise ValueError("The init parameter for k-modes should"
                          " be 'cao' or 'huang' or an ndarray,"
@@ -102,14 +103,19 @@ def k_modes_single(X, n_clusters=8, init='cao',
 
     # an array of frequencies of each attribute in each cluster
     frequencies = None
+    old_labels = None
 
     for i in range(max_iter):
         centers_old = centers.copy()
 
         # assign cluster labels to points (E-step of EM)
-        labels, inertia, frequencies = \
-                _labels_inertia(X, centers, frequencies, max_n_levels=max_n_levels, frequencies)
+        labels, inertia = _labels_inertia(X, centers)
 
+        # computation of the modes (M-step of EM)
+        centers, frequencies = _k_modes_centers(
+            X, labels, old_labels, n_clusters, frequencies, max_n_levels)
+
+        old_labels = labels
         if best_inertia is None or inertia < best_inertia:
             best_labels = labels.copy()
             best_centers = centers.copy()
@@ -118,11 +124,20 @@ def k_modes_single(X, n_clusters=8, init='cao',
     return best_labels, best_inertia, best_centers, i + 1
 
 
-def _labels_inertia(X, centers, frequencies=None, max_n_levels=None):
+def _labels_inertia(X, centers):
     n_clusters, n_features = centers.shape
 
     distances = pairwise_distances(X, centers, metric='hamming')
     labels = np.argmin(distances, axis=1)
+
+    inertia = distances[np.arange(distances.shape[0]), labels].sum()
+
+    return labels, inertia
+
+
+def _k_modes_centers(X, labels, old_labels, n_clusters, frequencies, max_n_levels):
+    n_features = X.shape[1]
+    centers = np.empty((n_clusters, n_features))
 
     # an array of frequencies of each attribute in each cluster
     if frequencies is None:
@@ -145,7 +160,8 @@ def _labels_inertia(X, centers, frequencies=None, max_n_levels=None):
         #    #      [1, 3, 4]]
         #    # frequency[old_label] - np.eye(max_n_levels)[X].sum(axis=1)
         #    # frequency[new_label] + np.eye(max_n_levels)[X].sum(axis=1)
-        old_labels = np.ones_like(labels)
+        if old_labels is None:
+            raise ValueError('old_labels is None')
         moved_mask = (old_labels != labels)
         moved_counts = np.eye(max_n_levels)[X[moved_mask]].sum(axis=0)
         frequencies[old_labels] -= moved_counts
@@ -161,9 +177,7 @@ def _labels_inertia(X, centers, frequencies=None, max_n_levels=None):
         else:  # init to new mode of cluster
             centers[center_id, :] = np.argmax(frequencies[center_id], axis=1)
 
-    inertia = distances[np.arange(distances.shape[0]), labels].sum()
-
-    return labels, inertia, frequencies
+    return centers, frequencies
 
 
 def k_modes(X, n_clusters=8, init='cao',
@@ -204,7 +218,12 @@ def k_modes(X, n_clusters=8, init='cao',
     best_labels, best_inertia, best_centers = None, None, None
     if n_jobs == 1:
         for it in range(n_init):
-            labels, inertia, centers, n_iter_ = kmeans_single(max_n_levels)
+
+            labels, inertia, centers, n_iter_ = k_modes_single(
+                X, n_clusters=n_clusters, init=init,
+                max_iter=max_iter, max_n_levels=max_n_levels,
+                verbose=verbose, tol=tol, random_state=random_state)
+
             if best_inertia is None or inertia < best_inertia:
                 best_labels = labels.copy()
                 best_centers = centers.copy()
@@ -220,8 +239,8 @@ def k_modes(X, n_clusters=8, init='cao',
 class KModes(BaseEstimator, ClusterMixin, TransformerMixin):
     """KModes.
     """
-    def __init__(self, n_clusters=8, init='cao', n_init=1,
-                 max_iter=100, tol=1e-4, verbose=0,
+    def __init__(self, n_clusters=8, init='huang', n_init=1,
+                 max_iter=100, tol=1e-4, verbose=False,
                  random_state=None, n_jobs=1):
         self.n_clusters = n_clusters
         self.init = init
@@ -230,6 +249,7 @@ class KModes(BaseEstimator, ClusterMixin, TransformerMixin):
         self.n_init = n_init
         self.random_state = random_state
         self.n_jobs = n_jobs
+        self.verbose = verbose
 
 
     def _check_fit_data(self, X):
@@ -238,6 +258,7 @@ class KModes(BaseEstimator, ClusterMixin, TransformerMixin):
             raise ValueError("n_samples=%d should be >= n_clusters=%d" % (
                 X.shape[0], self.n_clusters))
 
+        return X
 
     def fit(self, X, y=None):
         """Compute k-modes clustering.
@@ -249,11 +270,10 @@ class KModes(BaseEstimator, ClusterMixin, TransformerMixin):
         random_state = check_random_state(self.random_state)
         X = self._check_fit_data(X)
 
-        self.encoder_ = OrdinalEncoder(strategy='frequency')
+        self.encoder_ = OrdinalEncoder(strategy='none')
         ordinal_X = self.encoder_.fit_transform(X)
-
         max_n_levels = max(
-                [len(levels) for levels in self.encoder.level_map.values()])
+                [len(levels) for levels in self.encoder_.level_map])
 
         self.cluster_centers_, self.labels_, self.inertia_, self.n_iter_ = \
                 k_modes(

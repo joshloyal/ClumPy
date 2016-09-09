@@ -15,6 +15,7 @@ def fit_encode_1d(y, strategy='frequency'):
     y = column_or_1d(y, warn=True)
     levels = np.unique(y)
 
+    # FIXME: serach sorted doesn't work here...
     if strategy == 'frequency':
         frequencies = [np.sum(y == level) for level in levels]
         levels = levels[np.argsort(frequencies)]
@@ -30,7 +31,6 @@ def transform_encode_1d(y, fit_levels):
     return np.searchsorted(fit_levels, y).reshape(-1, 1)
 
 
-
 def inverse_encode_1d(y, fit_levels):
     """There is probably a built in numpy method for this..."""
     vec_map = np.vectorize(lambda x: fit_levels[x])
@@ -40,14 +40,15 @@ def inverse_encode_1d(y, fit_levels):
 class OrdinalEncoder(BaseEstimator, TransformerMixin):
     def __init__(self, strategy='frequency'):
         self.strategy = strategy
-        self.level_map = {}
+        self.level_map = []
 
     def fit(self, X):
         X = column_atleast_2d(X)
 
         self.n_features_ = X.shape[1]
-        self.level_map = {column_idx: fit_encode_1d(X[:, column_idx]) for
-                          column_idx in xrange(self.n_features_)}
+        self.level_map = [
+            fit_encode_1d(X[:, column_idx], strategy=self.strategy) for
+            column_idx in xrange(self.n_features_)]
 
         return self
 
@@ -59,7 +60,7 @@ class OrdinalEncoder(BaseEstimator, TransformerMixin):
                              " and n_features_fit= %d" % self.n_features_)
 
         return np.hstack([transform_encode_1d(X[:, column_idx], levels) for
-                          column_idx, levels in self.level_map.iteritems()])
+                          column_idx, levels in enumerate(self.level_map)])
 
     def inverse_transform(self, X):
         X = column_atleast_2d(X)
