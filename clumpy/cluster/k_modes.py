@@ -139,14 +139,19 @@ def k_modes_single(X, n_clusters=8, init='cao',
     frequencies = None
     old_labels = None
 
+    # initial labels and inertia
+    labels, inertia = _labels_inertia(X, centers)
+
     for i in range(max_iter):
         # assign cluster labels to points (E-step of EM)
-        labels, inertia = _labels_inertia(X, centers)
-        print(labels)
+        labels, centers, inertia =  _k_modes_iter(
+               X, centers, old_labels, labels, frequencies, max_n_levels)
+
+        #labels, inertia = _labels_inertia(X, centers)
 
         # computation of the modes (M-step of EM)
-        centers, frequencies = _k_modes_centers(
-            X, labels, old_labels, n_clusters, frequencies, max_n_levels, random_state)
+        #centers, frequencies = _k_modes_centers(
+        #    X, labels, old_labels, n_clusters, frequencies, max_n_levels, random_state)
 
         if best_inertia is None or inertia < best_inertia:
             best_labels = labels.copy()
@@ -200,20 +205,49 @@ def _labels_inertia(X, centers):
     # cythonize me!
     n_samples = X.shape[0]
     n_clusters, n_features = centers.shape
-    labels = np.empty(n_samples)
+
+
+    distances = pairwise_distances(X, centers, metric='hamming')
+    labels = np.argmin(distances, axis=1)
+    inertia = distances[np.arange(distances.shape[0]), labels].sum()
+
+    return labels, inertia
+
+
+def _k_modes_iter(X, centers, old_labels, labels, frequencies, max_n_levels):
+    # cythonize me!
+    n_samples = X.shape[0]
+    n_clusters, n_features = centers.shape
     inertia = 0
+
+    if frequencies is None:
+        frequencies = _initialize_frequencies(
+                X, labels, n_clusters, max_n_levels)
 
     # we need to actualy update modes after each allocation!
     for point_id in xrange(n_samples):
-        distances = pairwise_distances(X[point_id], centers, metric='hamming')
-        labels[point_id] = np.argmin(distances, axis=1)
-        inertia += distances[labels[point_id]]
-    #distances = pairwise_distances(X, centers, metric='hamming')
-    #labels = np.argmin(distances, axis=1)
+        distances = pairwise_distances(
+                np.array(X[point_id, :]).reshape(1, n_features),
+                centers, metric='hamming').ravel()
+        new_cluster_id = np.argmin(distances)
 
-    #inertia = distances[np.arange(distances.shape[0]), labels].sum()
+        # update labels and inertia
+        labels[point_id] = new_cluster_id
+        inertia += distances[new_cluster_id]
 
-    return labels, inertia
+        # update cluster statistics and centers
+        counts = np.eye(max_n_levels)[X[point_id]]
+        if old_labels is None:
+            frequencies[new_cluster_id] += counts
+        else:
+            frequencies[old_labels[point_id]] -= counts
+            frequencies[new_cluster_id] += counts
+
+        # update cluster modes (look out for empty clusters!)
+        for center_id in xrange(n_clusters):
+            centers[center_id, :] = np.argmax(frequencies[center_id], axis=1)
+
+    return labels, centers, inertia
 
 
 def _k_modes_centers(X, labels, old_labels, n_clusters, frequencies, max_n_levels, random_state=None):
