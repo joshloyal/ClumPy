@@ -1,9 +1,12 @@
 import time
 
 import numpy as np
+import pandas as pd
 from sklearn.utils import check_random_state
 from sklearn import datasets
+from sklearn.feature_selection import VarianceThreshold
 
+from kmodes import kmodes
 import clumpy.cluster.k_modes as k_modes
 from clumpy.preprocessing import OrdinalEncoder
 from clumpy.cluster.tests import soybean_data
@@ -73,15 +76,27 @@ def test_k_modes_centers():
 def test_k_modes_soybean(soybean_data):
     #X = gen_data(n_samples=100000)
     X, labels = soybean_data
-    clusterer = k_modes.KModes(n_clusters=4, init='cao', n_init=1,
-                               verbose=True, random_state=1,
-                               max_iter=10)
 
+    clusterer = k_modes.KModes(n_clusters=4, init='cao', n_init=1,
+                               random_state=123,
+                               max_iter=10)
+    #clusterer = kmodes.KModes(n_clusters=4, init='Cao', n_init=1, max_iter=100)
     t0 = time.time()
     clusterer.fit(X)
     print(time.time() - t0)
-    #print(clusterer.predict(X))
-    print(clusterer.labels_)
-    print(labels)
-    print(clusterer.cluster_centers_.shape)
-    print(clusterer.inertia_)
+    ##print(clusterer.predict(X))
+    #print(labels)
+    #print(clusterer.labels_)
+    #print(clusterer.inertia_)
+    #print(labels)
+    #print('centers', clusterer.cluster_centers_)
+    #print(clusterer.inertia_)
+
+
+    @np.vectorize
+    def to_labels(X):
+        label_dict = {'D1': 1, 'D2': 2, 'D3': 0, 'D4': 3}
+        return label_dict[X]
+
+    print np.mean(clusterer.labels_ == to_labels(labels))
+

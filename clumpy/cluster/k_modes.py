@@ -30,6 +30,11 @@ def _unique_rows(array):
     return np.unique(flat_array).view(array.dtype).reshape(-1, array.shape[1])
 
 
+def count_matrix(array, max_n_levels, dtype=np.int64):
+    """A matrix of frequencies of the various categorical variables."""
+    return np.eye(max_n_levels, dtype=dtype)[array]
+
+
 def _huang_init(X, n_clusters, random_state=None):
     """Initialize centroids according to method of Huang [1997]."""
     random_state = check_random_state(random_state)
@@ -73,6 +78,7 @@ def _categorical_density(X):
     for feature_id in xrange(n_features):
         uniques, counts = np.unique(X[:, feature_id], return_counts=True)
         density += counts[X[:, feature_id]]
+    density /= n_samples
 
     return density
 
@@ -103,6 +109,17 @@ def _cao_init(X, n_clusters, random_state=None):
     return centers
 
 
+def _random_init(X, n_clusters, random_state=None):
+    random_state = check_random_state(random_state)
+
+    n_samples  = X.shape[0]
+
+    seed_ids = random_state.choice(np.arange(n_samples), n_clusters)
+    centers = X[seed_ids, :]
+
+    return centers
+
+
 def _init_centroids(X, n_clusters=8, init='cao', random_state=None):
     random_state = check_random_state(random_state)
     n_samples = X.shape[0]
@@ -111,11 +128,12 @@ def _init_centroids(X, n_clusters=8, init='cao', random_state=None):
         centers = _cao_init(X, n_clusters, random_state)
     elif isinstance(init, string_types) and init == 'huang':
         centers = _huang_init(X, n_clusters, random_state)
+    elif isinstance(init, string_types) and init == 'random':
+        centers = _random_init(X, n_clusters, random_state)
     else:
         raise ValueError("The init parameter for k-modes should"
                          " be 'cao' or 'huang' or an ndarray,"
                          " '%s' (type '%s') was passed." % (init, type(init)))
-
 
     return centers
 
@@ -126,45 +144,45 @@ def k_modes_single(X, n_clusters=8, init='cao',
                    tol=1e-4, random_state=None):
     random_state = check_random_state(random_state)
 
-    best_labels, best_inertia, best_centers = None, None, None
-
     # init
     centers = _init_centroids(X, n_clusters, init, random_state=random_state)
+    frequencies = None
 
     if verbose:
         print("Initialization complete")
 
-
-    # an array of frequencies of each attribute in each cluster
-    frequencies = None
-    old_labels = None
-
-    # initial labels and inertia
+    # initial labels, inertia, cluster frequencies, and modes
     labels, inertia = _labels_inertia(X, centers)
+    frequencies = _initialize_frequencies(
+            X, labels, n_clusters, max_n_levels)
+    for center_id in xrange(n_clusters):
+        centers[center_id, :] = cluster_modes(frequencies, center_id)
 
+    best_labels, best_inertia, best_centers = labels, inertia, centers
     for i in range(max_iter):
-        # assign cluster labels to points (E-step of EM)
-        labels, centers, inertia =  _k_modes_iter(
-               X, centers, old_labels, labels, frequencies, max_n_levels)
+        # This is the M-Step (updates of center modes)
+        centers, n_movements =  _center_modes(
+               X, centers, labels, frequencies, max_n_levels)
 
-        #labels, inertia = _labels_inertia(X, centers)
+        # This is the E-Step (label updates)
+        # NOTE: We need to re-calculate cluster frequencies here
+        #       (this is assuming we are smart and update only diffs. Do that.)
+        labels, inertia = _labels_inertia(X, centers)
 
-        # computation of the modes (M-step of EM)
-        #centers, frequencies = _k_modes_centers(
-        #    X, labels, old_labels, n_clusters, frequencies, max_n_levels, random_state)
-
-        if best_inertia is None or inertia < best_inertia:
+        if inertia < best_inertia:
             best_labels = labels.copy()
             best_centers = centers.copy()
             best_inertia = inertia
 
-        if old_labels is not None and (old_labels != labels).sum() == 0:
+        # If no points are moving we have converged. Break early.
+        if n_movements == 0:
             break
-
-        old_labels = labels
 
     return best_labels, best_inertia, best_centers, i + 1
 
+
+def cluster_modes(frequencies, center_id):
+    return np.argmax(frequencies[center_id], axis=1)
 
 
 def _initialize_frequencies(X, labels, n_clusters, max_n_levels):
@@ -192,20 +210,10 @@ def _initialize_frequencies(X, labels, n_clusters, max_n_levels):
     return frequencies
 
 
-def _move_points(X, frequencies, max_n_levels, old_labels, new_labels):
-    """Move points between clusters. (this needs to be cythonized)"""
-    moved_ids = np.where(old_labels != new_labels)
-    for moved_id in moved_ids:
-        moved_counts = np.eye(max_n_levels)[X[moved_id]]
-        frequencies[old_labels[moved_id]] -= moved_counts
-        frequencies[new_labels[moved_id]] += moved_counts
-
-
 def _labels_inertia(X, centers):
     # cythonize me!
     n_samples = X.shape[0]
     n_clusters, n_features = centers.shape
-
 
     distances = pairwise_distances(X, centers, metric='hamming')
     labels = np.argmin(distances, axis=1)
@@ -214,74 +222,46 @@ def _labels_inertia(X, centers):
     return labels, inertia
 
 
-def _k_modes_iter(X, centers, old_labels, labels, frequencies, max_n_levels):
+def _transfer_point(X, point_id, frequencies, from_center_id, to_center_id, max_n_levels):
+    counts = count_matrix(X[point_id], max_n_levels)
+    frequencies[from_center_id] -= counts
+    frequencies[to_center_id] += counts
+
+
+def _center_modes(X, centers, labels, frequencies, max_n_levels):
     # cythonize me!
     n_samples = X.shape[0]
     n_clusters, n_features = centers.shape
-    inertia = 0
+    n_movements = 0
 
-    if frequencies is None:
-        frequencies = _initialize_frequencies(
-                X, labels, n_clusters, max_n_levels)
-
-    # we need to actualy update modes after each allocation!
     for point_id in xrange(n_samples):
+        old_center_id = labels[point_id]
+
+        # determine closest centers
         distances = pairwise_distances(
                 np.array(X[point_id, :]).reshape(1, n_features),
                 centers, metric='hamming').ravel()
-        new_cluster_id = np.argmin(distances)
+        new_center_id = np.argmin(distances)
 
-        # update labels and inertia
-        labels[point_id] = new_cluster_id
-        inertia += distances[new_cluster_id]
+        # update cluster statistics if this point wants to move
+        if old_center_id != new_center_id:
+            _transfer_point(X, point_id, frequencies, old_center_id, new_center_id, max_n_levels)
 
-        # update cluster statistics and centers
-        counts = np.eye(max_n_levels)[X[point_id]]
-        if old_labels is None:
-            frequencies[new_cluster_id] += counts
-        else:
-            frequencies[old_labels[point_id]] -= counts
-            frequencies[new_cluster_id] += counts
+            # update cluster modes since they may change after movement
+            centers[old_center_id, :] = cluster_modes(frequencies, old_center_id)
+            centers[new_center_id, :] = cluster_modes(frequencies, new_center_id)
 
-        # update cluster modes (look out for empty clusters!)
-        for center_id in xrange(n_clusters):
-            centers[center_id, :] = np.argmax(frequencies[center_id], axis=1)
+            # make sure the old cluster is not empty
+            if not np.any(frequencies[old_center_id]):
+                cluster_counts = np.sum(frequencies, axis=2)[:, 0]
+                most_counts_id = np.argmax(cluster_counts)
+                new_center_id = random_state.choice(np.where(labels == most_counts_id))
+                centers[old_center_id, :] = X[new_center_id]
+                _transfer_point(X, new_center_id, frequencies, most_center_id, old_center_id, max_n_levels)
 
-    return labels, centers, inertia
+            n_movements += 1
 
-
-def _k_modes_centers(X, labels, old_labels, n_clusters, frequencies, max_n_levels, random_state=None):
-    random_state = check_random_state(random_state)
-    n_features = X.shape[1]
-    centers = np.empty((n_clusters, n_features))
-
-    if frequencies is None:
-        frequencies = _initialize_frequencies(
-                X, labels, n_clusters, max_n_levels)
-    else:
-        _move_points(X, frequencies, max_n_levels, old_labels, labels)
-
-    # centroid update
-    for center_id in xrange(n_clusters):
-        counts = (labels == center_id).sum()
-        if counts == 0:  # empty cluster random init from largest cluster
-            #for feature_id in xrange(n_features):  # please refactor!
-            #    uniques = np.unique(X[:, feature_id])
-            #    centers[center_id, feature_id] = random_state.choice(uniques)
-            # cache this maybe?
-            cluster_ids, counts = np.uniques(labels, return_counts=True)
-            max_cluster_id = counts.argmax()
-            new_id = random_state.choice(labels[labels == max_cluster_id])
-            centers[center_id, :] = X[new_id, :]
-
-            moved_counts = np.eye(max_n_levels)[X[new_id]].sum(axis=0)
-            frequency[max_cluster_id] -= moved_counts
-            frequency[center_id] += moved_counts
-            labels[new_id] = cluster_id
-        else:  # init to new mode of cluster
-            centers[center_id, :] = np.argmax(frequencies[center_id], axis=1)
-
-    return centers, frequencies
+    return centers, n_movements
 
 
 def k_modes(X, n_clusters=8, init='cao',
@@ -379,7 +359,7 @@ class KModes(BaseEstimator, ClusterMixin, TransformerMixin):
         max_n_levels = max(
                 [len(levels) for levels in self.encoder_.level_map])
 
-        self.cluster_centers_, self.labels_, self.inertia_, self.n_iter_ = \
+        self._cluster_centers, self.labels_, self.inertia_, self.n_iter_ = \
                 k_modes(
                     ordinal_X, n_clusters=self.n_clusters, init=self.init,
                     n_init=self.n_init, max_iter=self.max_iter,
@@ -389,3 +369,11 @@ class KModes(BaseEstimator, ClusterMixin, TransformerMixin):
                     n_jobs=self.n_jobs, return_n_iter=True)
 
         return self
+
+    @property
+    def cluster_centers_(self):
+        return self.encoder_.inverse_transform(self._cluster_centers)
+
+    def transform(self, X, y=None):
+        ordinal_X = self.encoder_.transform(X)
+        return pairwise_distances(ordinal_X, self._cluster_centers, metric='hamming')  # look into using Ng distance (weight by in cluster frequency if equal to mode)
