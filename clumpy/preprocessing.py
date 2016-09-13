@@ -19,7 +19,7 @@ def fit_encode_1d(y, strategy='frequency'):
         frequencies = [np.sum(y == level) for level in levels]
         levels = levels[np.argsort(frequencies)]
 
-    return levels
+    return levels.astype(np.int64)
 
 
 def transform_encode_1d(y, fit_levels):
@@ -37,7 +37,7 @@ def inverse_encode_1d(y, fit_levels):
 
 
 class OrdinalEncoder(BaseEstimator, TransformerMixin):
-    def __init__(self, strategy='frequency'):
+    def __init__(self, strategy='random'):
         self.strategy = strategy
         self.level_map = []
 

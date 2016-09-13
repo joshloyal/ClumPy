@@ -2,6 +2,7 @@ import time
 
 import numpy as np
 import pandas as pd
+import scipy.stats as stats
 from sklearn.utils import check_random_state
 from sklearn import datasets
 from sklearn.feature_selection import VarianceThreshold
@@ -69,9 +70,63 @@ def test_labels_inertia(soybean_data):
     np.testing.assert_allclose(inertia, 1/3.)
 
 
-def test_k_modes_centers():
-    pass
+def test_initialize_frequencies(soybean_data):
+    """test frequencies allign with orginal data."""
+    X, labels = soybean_data
+    n_samples, n_features = X.shape
 
+    encoder = OrdinalEncoder(strategy='none')
+    ordinal_X = encoder.fit_transform(X)
+    max_n_levels = max(
+            [len(levels) for levels in encoder.level_map])
+
+    freq = k_modes._initialize_frequencies(
+            ordinal_X, labels, 4, max_n_levels)
+
+    assert freq.shape == (4, n_features, max_n_levels)
+
+    # brute force check that counts are correct
+    for label_id in range(4):
+        label_frequencies = freq[label_id]
+        for feature_id in xrange(n_features):
+            uniques, counts = np.unique(ordinal_X[labels == label_id][:, feature_id],
+                                        return_counts=True)
+            feature_freq = label_frequencies[feature_id]
+            nonzero_counts = feature_freq[feature_freq != 0]
+            np.testing.assert_array_equal(counts, nonzero_counts)
+
+
+def test_cluster_modes(soybean_data):
+    """test modes calculation from frequency matrix is correct."""
+    X, labels = soybean_data
+    n_samples, n_features = X.shape
+
+    encoder = OrdinalEncoder(strategy='none')
+    ordinal_X = encoder.fit_transform(X)
+    max_n_levels = max(
+            [len(levels) for levels in encoder.level_map])
+
+    freq = k_modes._initialize_frequencies(
+            ordinal_X, labels, 4, max_n_levels)
+    for label_id in range(4):
+        modes = k_modes.cluster_modes(freq, label_id)
+        expected_modes, expected_counts = stats.mode(
+                ordinal_X[labels == label_id])
+        np.testing.assert_array_equal(modes, expected_modes.ravel())
+
+
+def test_count_matrix(soybean_data):
+    X, labels = soybean_data
+    n_samples, n_features = X.shape
+
+    encoder = OrdinalEncoder(strategy='none')
+    ordinal_X = encoder.fit_transform(X)
+    max_n_levels = max(
+            [len(levels) for levels in encoder.level_map])
+
+    counts = k_modes.count_matrix(ordinal_X[0, :], max_n_levels)
+    print(ordinal_X[0, :])
+    print(counts)
 
 def test_k_modes_soybean(soybean_data):
     #X = gen_data(n_samples=100000)
@@ -86,17 +141,10 @@ def test_k_modes_soybean(soybean_data):
     print(time.time() - t0)
     ##print(clusterer.predict(X))
     #print(labels)
-    #print(clusterer.labels_)
+    print(clusterer.labels_)
     #print(clusterer.inertia_)
     #print(labels)
     #print('centers', clusterer.cluster_centers_)
     #print(clusterer.inertia_)
 
-
-    @np.vectorize
-    def to_labels(X):
-        label_dict = {'D1': 1, 'D2': 2, 'D3': 0, 'D4': 3}
-        return label_dict[X]
-
-    print np.mean(clusterer.labels_ == to_labels(labels))
-
+    #print np.mean(clusterer.labels_ == labels)

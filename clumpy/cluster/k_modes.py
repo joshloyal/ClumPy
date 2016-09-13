@@ -11,13 +11,17 @@ import warnings
 
 import numpy as np
 
+import scipy
 from sklearn.base import BaseEstimator, ClusterMixin, TransformerMixin
 from sklearn.metrics.pairwise import pairwise_distances
 from sklearn.utils import check_random_state
 from sklearn.utils.validation import check_array
 
-
+from analysis.perf import profileit
 from clumpy.preprocessing import OrdinalEncoder
+
+
+DTYPE = np.int64
 
 
 def _unique_rows(array):
@@ -33,6 +37,18 @@ def _unique_rows(array):
 def count_matrix(array, max_n_levels, dtype=np.int64):
     """A matrix of frequencies of the various categorical variables."""
     return np.eye(max_n_levels, dtype=dtype)[array]
+
+
+def _categorical_density(X):
+    n_samples, n_features = X.shape
+
+    # calculate density matrix for each point
+    density = np.zeros(n_samples)
+    for feature_id in xrange(n_features):
+        uniques, counts = np.unique(X[:, feature_id], return_counts=True)
+        density += counts[X[:, feature_id]] / n_samples
+
+    return density / n_features
 
 
 def _huang_init(X, n_clusters, random_state=None):
@@ -70,19 +86,6 @@ def _huang_init(X, n_clusters, random_state=None):
     return centers
 
 
-def _categorical_density(X):
-    n_samples, n_features = X.shape
-
-    # calculate density matrix for each point
-    density = np.zeros(n_samples)
-    for feature_id in xrange(n_features):
-        uniques, counts = np.unique(X[:, feature_id], return_counts=True)
-        density += counts[X[:, feature_id]]
-    density /= n_samples
-
-    return density
-
-
 def _cao_init(X, n_clusters, random_state=None):
     """Initialize centroids according to the method of Cao et al. [2009]
 
@@ -91,20 +94,20 @@ def _cao_init(X, n_clusters, random_state=None):
           wrt the number of clusters.
     """
     n_samples, n_features = X.shape
-    centers = np.empty((n_clusters, n_features), dtype=np.float32)
+    centers = np.empty((n_clusters, n_features), dtype=X.dtype)
 
     # calculate density matrix for each point
     density = _categorical_density(X)
 
     # choose initial centroid based on distance and density
-    centers[0, :] = X[np.argmax(density), :]
-
+    centers[0] = X[np.argmax(density)]
     if n_clusters > 1:
         for center_id in xrange(1, n_clusters):
-            center_density = (
-                    pairwise_distances(X, centers[:center_id, :]) *
-                    density.reshape(-1, 1))
-            centers[center_id, :] = X[np.argmax(np.min(center_density, axis=1))]
+            center_density = (scipy.spatial.distance.cdist(
+                    centers[:center_id],
+                    X,
+                    metric='hamming') * density)
+            centers[center_id] = X[np.argmax(np.min(center_density, axis=0))]
 
     return centers
 
@@ -141,8 +144,9 @@ def _init_centroids(X, n_clusters=8, init='cao', random_state=None):
 def k_modes_single(X, n_clusters=8, init='cao',
                    max_iter=100, max_n_levels=None,
                    verbose=False,
-                   tol=1e-4, random_state=None):
+                   random_state=None):
     random_state = check_random_state(random_state)
+    n_samples = X.shape[0]
 
     # init
     centers = _init_centroids(X, n_clusters, init, random_state=random_state)
@@ -192,12 +196,12 @@ def _initialize_frequencies(X, labels, n_clusters, max_n_levels):
     cluster.
     """
     n_features = X.shape[1]
-    frequencies = np.zeros((n_clusters, n_features, max_n_levels))
+    frequencies = np.zeros((n_clusters, n_features, max_n_levels), dtype=DTYPE)
 
     # what is faster? (probably good for large features?)
     for cluster_id in xrange(n_clusters):
         cluster_mask = (labels == cluster_id)
-        counts = np.eye(max_n_levels)[X[cluster_mask]].sum(axis=0)
+        counts = np.eye(max_n_levels, dtype=DTYPE)[X[cluster_mask]].sum(axis=0)
         frequencies[cluster_id] += counts
 
     #for cluster_id in xrange(n_clusters):
@@ -238,7 +242,9 @@ def _center_modes(X, centers, labels, frequencies, max_n_levels):
         old_center_id = labels[point_id]
 
         # determine closest centers
-        distances = pairwise_distances(
+        # N.B. pairwise distance is slower, since
+        # check_array has non-negligable overhead.
+        distances = scipy.spatial.distance.cdist(
                 np.array(X[point_id, :]).reshape(1, n_features),
                 centers, metric='hamming').ravel()
         new_center_id = np.argmin(distances)
@@ -266,7 +272,7 @@ def _center_modes(X, centers, labels, frequencies, max_n_levels):
 
 def k_modes(X, n_clusters=8, init='cao',
             n_init=1, max_iter=100, verbose=False,
-            tol=1e-4, random_state=None, n_jobs=1,
+            random_state=None, n_jobs=1,
             return_n_iter=False, max_n_levels=None):
     """K-modes clustering algorithm"""
     if n_init <= 0:
@@ -278,7 +284,6 @@ def k_modes(X, n_clusters=8, init='cao',
                          " got %d instead" % max_iter)
 
     best_inertia = np.inf
-    # tol = _tolerance(X, tol)  # data dependent tolerance
 
     # Are there more n_clusters than unique rows? Then set the unique
     # rows to the initial values and skip iteration.
@@ -306,7 +311,7 @@ def k_modes(X, n_clusters=8, init='cao',
             labels, inertia, centers, n_iter_ = k_modes_single(
                 X, n_clusters=n_clusters, init=init,
                 max_iter=max_iter, max_n_levels=max_n_levels,
-                verbose=verbose, tol=tol, random_state=random_state)
+                verbose=verbose, random_state=random_state)
 
             if best_inertia is None or inertia < best_inertia:
                 best_labels = labels.copy()
@@ -324,12 +329,11 @@ class KModes(BaseEstimator, ClusterMixin, TransformerMixin):
     """KModes.
     """
     def __init__(self, n_clusters=8, init='huang', n_init=1,
-                 max_iter=100, tol=1e-4, verbose=False,
+                 max_iter=100, verbose=False,
                  random_state=None, n_jobs=1):
         self.n_clusters = n_clusters
         self.init = init
         self.max_iter = max_iter
-        self.tol = tol
         self.n_init = n_init
         self.random_state = random_state
         self.n_jobs = n_jobs
@@ -354,7 +358,7 @@ class KModes(BaseEstimator, ClusterMixin, TransformerMixin):
         random_state = check_random_state(self.random_state)
         X = self._check_fit_data(X)
 
-        self.encoder_ = OrdinalEncoder(strategy='none')
+        self.encoder_ = OrdinalEncoder()
         ordinal_X = self.encoder_.fit_transform(X)
         max_n_levels = max(
                 [len(levels) for levels in self.encoder_.level_map])
@@ -365,7 +369,7 @@ class KModes(BaseEstimator, ClusterMixin, TransformerMixin):
                     n_init=self.n_init, max_iter=self.max_iter,
                     max_n_levels=max_n_levels,
                     verbose=self.verbose,
-                    tol=self.tol, random_state=self.random_state,
+                    random_state=self.random_state,
                     n_jobs=self.n_jobs, return_n_iter=True)
 
         return self
@@ -376,4 +380,8 @@ class KModes(BaseEstimator, ClusterMixin, TransformerMixin):
 
     def transform(self, X, y=None):
         ordinal_X = self.encoder_.transform(X)
-        return pairwise_distances(ordinal_X, self._cluster_centers, metric='hamming')  # look into using Ng distance (weight by in cluster frequency if equal to mode)
+        return pairwise_distances(
+                ordinal_X, self._cluster_centers, metric='hamming')
+    def predict(self, X):
+        ordinal_X = self.encoder_.transform(X)
+        return _labels_inertia(ordinal_X, self._cluster_centers)[0]
