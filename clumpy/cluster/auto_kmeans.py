@@ -11,10 +11,10 @@ class UnsupervisedCV(object):
     def __init__(self, n_samples):
         self.n_samples = n_samples
 
-    def split(self):
+    def split(self, X=None, y=None, groups=None):
         return np.arange(self.n_samples), np.arange(self.n_samples)
 
-    def get_n_splits(self):
+    def get_n_splits(self, X=None, y=None, groups=None):
         return 1
 
     def __len__(self):
@@ -53,12 +53,16 @@ def auto_kmeans(X, n_clusters=[2, 3, 4], n_jobs=1):
     in parallel instead of sequential; however, we take advantage of
     the parallelism inside the model instead.
     """
-    grid_search = GridSearchCV(
-        cluster.KMeans(n_init=5, max_iter=10, n_jobs=n_jobs),
-        param_grid={'n_clusters': n_clusters},
-        cv=UnsupervisedCV(n_samples=int(X.shape[0])),
-        scoring=make_cluster_coherence_scorer(metrics.silhouette_score),
-        n_jobs=1)
-    grid_search.fit(X)
+    best_score = -np.inf
+    best_clusterer = None
+    for cluster_k in n_clusters:
+        cluster_estimator = cluster.KMeans(n_clusters=cluster_k, n_init=5, max_iter=10, n_jobs=n_jobs)
+        labels = cluster_estimator.fit_predict(X)
+        score = metrics.silhouette_score(X, labels)
+        if score > best_score:
+            best_clusterer = cluster_estimator
+            best_score = score
 
-    return grid_search.best_estimator_
+    return best_clusterer
+
+

@@ -1,4 +1,5 @@
 import numpy as np
+import prim
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.tree import _tree, DecisionTreeClassifier
 from sklearn.preprocessing import Imputer
@@ -189,3 +190,15 @@ def tree_descriptions(data, cluster_labels,
         leaf_descriptions.append(trim_path(best_path, categorical_columns=cat_features))
 
     return leaf_descriptions
+
+def prim_descriptions(data, cluster_labels, feature_names=[]):
+    boxes = []
+    for cluster_id in np.unique(cluster_labels):
+        cluster_features = feature_names[cluster_id]
+        p = prim.Prim(data,
+                      cluster_labels == cluster_id,
+                      threshold=0.5,
+                      threshold_type='>',
+                      include=cluster_features)
+        boxes.append(p.find_box())
+    return boxes

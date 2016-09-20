@@ -26,19 +26,34 @@ def dtype_dict(dataframe, dtype_filter=None):
     return {k.name: v for k, v in dtype_groups.items() if dtype_filter(k.name)}
 
 
-def is_numeric(dtype):
-    if isinstance(dtype, six.string_types):
+def is_subdtype(dtype1, dtype2):
+    if isinstance(dtype1, six.string_types):
         try:
-            dtype = np.dtype(dtype)
+            dtype1 = np.dtype(dtype1)
         except TypeError:
             return False
 
-    return np.issubdtype(dtype, np.number)
+    return np.issubdtype(dtype1, dtype2)
 
+
+def is_ordinal(dtype):
+    return is_subdtype(dtype, np.integer)
+
+def is_continous(dtype):
+    return is_subdtype(dtype, np.number) and not is_ordinal(dtype)
+
+def is_numeric(dtype):
+    return is_subdtype(dtype, np.number)
 
 def is_categorical(dtype):
     return not is_numeric(dtype)
 
+
+def ordinal_columns(dataframe):
+    return unflatten_list(dtype_dict(dataframe, is_ordinal).values())
+
+def continous_columns(dataframe):
+    return unflatten_list(dtype_dict(dataframe, is_continous).values())
 
 def numeric_columns(dataframe):
     return unflatten_list(dtype_dict(dataframe, is_numeric).values())

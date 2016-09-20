@@ -9,3 +9,4 @@ from clumpy import importance
 from clumpy import datasets
 from clumpy import plots
 from clumpy import metrics
+from clumpy import analysis
