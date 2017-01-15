@@ -16,7 +16,7 @@ def setup_package():
         author='Joshua D. Loyal',
         url='https://github.com/joshloyal/ClumPy',
         license='MIT',
-        install_requires=['numpy', 'scipy', 'scikit-learn', 'prim'],
+        install_requires=['numpy', 'scipy', 'scikit-learn', 'prim', 'networkx'],
         packages=PACKAGES,
     )
 
