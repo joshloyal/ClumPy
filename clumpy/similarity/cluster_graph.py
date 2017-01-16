@@ -25,7 +25,13 @@ def get_induced_partitions(clusterer, data):
     A list of length clusterer.n_clusters. Each element is the indices
     of the data points placed in that cluster.
     """
-    labels = clusterer.predict(data)
+    if hasattr(clusterer, 'predict'):
+        labels = clusterer.predict(data)
+    else:
+        labels = clusterer.labels_
+        if labels.shape[0] != data.shape[0]:
+            raise ValueError('Could not get predictions')
+
     return [np.where(labels == cluster_id)[0]
             for cluster_id in xrange(clusterer.n_clusters)]
 
